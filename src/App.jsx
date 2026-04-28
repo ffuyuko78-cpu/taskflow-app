@@ -1,7 +1,10 @@
-// v2.2 - Auto calendar sync + duplicate prevention
+// v2.3 - Mobile signInWithRedirect support
 import { useState, useEffect } from 'react';
-import { onAuthStateChanged, signInWithPopup } from 'firebase/auth';
+import { onAuthStateChanged, signInWithPopup, signInWithRedirect, getRedirectResult } from 'firebase/auth';
 import { auth, googleProvider } from './firebase';
+
+// モバイル判定
+const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 import { useAppDate } from './hooks/useAppDate';
 import { useTasks } from './hooks/useTasks';
 import { useNotifications } from './hooks/useNotifications';
@@ -20,7 +23,12 @@ function LoginScreen() {
     setLoading(true);
     setError('');
     try {
-      await signInWithPopup(auth, googleProvider);
+      if (isMobile) {
+        // モバイルはリダイレクト方式（ポップアップがブロックされるため）
+        await signInWithRedirect(auth, googleProvider);
+      } else {
+        await signInWithPopup(auth, googleProvider);
+      }
     } catch (e) {
       setError('ログインに失敗しました。もう一度お試しください。');
       setLoading(false);
@@ -58,7 +66,7 @@ function LoginScreen() {
 function TaskBoard({ user }) {
   const { appDate, setAppDate } = useAppDate(user.uid);
   const {
-    tasks, loading, addTask, updateTask, deleteTask, toggleComplete, reorderTasks, moveTasks, deleteTasks
+    tasks, loading, addTask, updateTask, deleteTask, toggleComplete, reorderTasks, moveTasks, deleteTasks, deleteDuplicates
   } = useTasks(user.uid);
   const { dueSoonTasks, showBanner, dismissBanner } = useNotifications(tasks, loading);
 
@@ -67,6 +75,29 @@ function TaskBoard({ user }) {
 
   const [showStart, setShowStart] = useState(false);
   const [showEnd, setShowEnd] = useState(false);
+  const [dedupeMessage, setDedupeMessage] = useState('');
+
+  // 「明日以降」の今日の日付タスクを「今日」に自動移動
+  useEffect(() => {
+    if (!tasks.length || loading) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const toMove = tasks.filter(t =>
+      t.category === 'future' && (t.date === today || t.dueDate === today)
+    );
+    if (toMove.length > 0) {
+      moveTasks(toMove.map(t => t.id), 'today');
+    }
+  }, [tasks, loading]);
+
+  const handleDeduplication = async () => {
+    const count = await deleteDuplicates();
+    if (count > 0) {
+      setDedupeMessage(`🗑️ ${count}件の重複を削除しました`);
+    } else {
+      setDedupeMessage('重複はありませんでした');
+    }
+    setTimeout(() => setDedupeMessage(''), 3000);
+  };
 
   const handleStartConfirm = async ({ keepTaskIds, moveToFutureIds, newDate }) => {
     if (moveToFutureIds.length > 0) {
@@ -96,11 +127,15 @@ function TaskBoard({ user }) {
         onCalendarClick={needsAuth ? syncWithAuth : null}
         calendarSyncing={syncing}
         onCalendarReset={resetAndResync}
+        onDeduplication={handleDeduplication}
       />
 
       {/* カレンダー同期メッセージ */}
       {syncMessage && (
         <div className="sync-message">{syncMessage}</div>
+      )}
+      {dedupeMessage && (
+        <div className="sync-message">{dedupeMessage}</div>
       )}
 
       {/* カレンダー連携ボタン（初回のみ表示） */}
@@ -163,6 +198,10 @@ export default function App() {
   const [user, setUser] = useState(undefined);
 
   useEffect(() => {
+    // モバイルのリダイレクト後にログイン結果を受け取る
+    if (isMobile) {
+      getRedirectResult(auth).catch(() => {});
+    }
     const unsub = onAuthStateChanged(auth, (u) => setUser(u || null));
     return unsub;
   }, []);
