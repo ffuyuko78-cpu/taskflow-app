@@ -23,12 +23,7 @@ function LoginScreen() {
     setLoading(true);
     setError('');
     try {
-      if (isMobile) {
-        // モバイルはリダイレクト方式（ポップアップがブロックされるため）
-        await signInWithRedirect(auth, googleProvider);
-      } else {
-        await signInWithPopup(auth, googleProvider);
-      }
+      await signInWithPopup(auth, googleProvider);
     } catch (e) {
       setError('ログインに失敗しました。もう一度お試しください。');
       setLoading(false);
@@ -198,12 +193,6 @@ export default function App() {
   const [user, setUser] = useState(undefined);
 
   useEffect(() => {
-    // モバイルのリダイレクト後にログイン結果を受け取る
-    if (isMobile) {
-      getRedirectResult(auth).then(result => {
-        if (result?.user) setUser(result.user);
-      }).catch(() => {});
-    }
     const unsub = onAuthStateChanged(auth, (u) => setUser(u || null));
     return unsub;
   }, []);
